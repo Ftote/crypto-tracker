@@ -76,16 +76,17 @@ const COINS = {
 
 // ─── State ────────────────────────────────────────────────────────────────────
 
-let assets      = [];
-let prices      = {};
-let pricesTs    = null;
-let history     = [];
-let currency    = 'usd';
-let editingId   = null;
-let selectedCoin = null;  // coin selected via API search suggestions
-let searchTimer = null;
-let clearStep   = 0;
-let clearTimer  = null;
+let assets       = [];
+let prices       = {};
+let pricesTs     = null;
+let history      = [];
+let currency     = 'usd';
+let editingId    = null;
+let selectedCoin = null;
+let searchTimer  = null;
+let clearStep    = 0;
+let clearTimer   = null;
+let sessionKey   = null; // AES-GCM CryptoKey, set after successful unlock
 
 // ─── Storage ─────────────────────────────────────────────────────────────────
 
@@ -97,11 +98,48 @@ const store = {
 
 // ─── Crypto ───────────────────────────────────────────────────────────────────
 
-async function sha256(str) {
-  const buf = await crypto.subtle.digest('SHA-256',
-    new TextEncoder().encode(str + ':cvault-v1'));
-  return Array.from(new Uint8Array(buf))
-    .map(b => b.toString(16).padStart(2, '0')).join('');
+function b64(buf) { return btoa(String.fromCharCode(...new Uint8Array(buf))); }
+function unb64(s) { return Uint8Array.from(atob(s), c => c.charCodeAt(0)); }
+
+async function deriveKey(password, salt) {
+  const raw = await crypto.subtle.importKey(
+    'raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveKey']
+  );
+  return crypto.subtle.deriveKey(
+    { name: 'PBKDF2', salt, iterations: 100000, hash: 'SHA-256' },
+    raw,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt']
+  );
+}
+
+async function encryptVault(key) {
+  const iv      = crypto.getRandomValues(new Uint8Array(12));
+  const plain   = JSON.stringify({ assets, history, currency });
+  const cipher  = await crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv }, key, new TextEncoder().encode(plain)
+  );
+  return { iv: b64(iv), data: b64(cipher) };
+}
+
+async function decryptVault(vault, key) {
+  const plain = await crypto.subtle.decrypt(
+    { name: 'AES-GCM', iv: unb64(vault.iv) }, key, unb64(vault.data)
+  );
+  return JSON.parse(new TextDecoder().decode(plain));
+}
+
+async function saveVault() {
+  if (!sessionKey) return;
+  const vault = await encryptVault(sessionKey);
+  await store.set({ vault });
+}
+
+// ─── XSS helper ──────────────────────────────────────────────────────────────
+
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
 // ─── Format helpers ───────────────────────────────────────────────────────────
@@ -170,7 +208,7 @@ async function saveSnapshot() {
   history.push({ date: today, value: val });
   history.sort((a, b) => (a.date < b.date ? -1 : 1));
   if (history.length > 90) history = history.slice(-90);
-  await store.set({ history });
+  await saveVault();
 }
 
 // ─── Price fetch ──────────────────────────────────────────────────────────────
@@ -208,8 +246,8 @@ async function searchCoinGecko(query, localHits, sg) {
 function renderSuggestions(hits, sg) {
   if (!hits.length) { sg.innerHTML = ''; return; }
   sg.innerHTML = hits
-    .map(h => `<div class="sug" data-ticker="${h.ticker}" data-id="${h.id}" data-name="${h.name}">
-      ${h.ticker} <span>${h.name}</span>
+    .map(h => `<div class="sug" data-ticker="${esc(h.ticker)}" data-id="${esc(h.id)}" data-name="${esc(h.name)}">
+      ${esc(h.ticker)} <span>${esc(h.name)}</span>
     </div>`)
     .join('');
   sg.querySelectorAll('.sug').forEach(s =>
@@ -350,8 +388,8 @@ function render() {
     return `<div class="row">
       <div class="row-top">
         <div class="row-left">
-          <span class="sym">${a.symbol}</span>
-          <span class="cname">${a.name}</span>
+          <span class="sym">${esc(a.symbol)}</span>
+          <span class="cname">${esc(a.name)}</span>
         </div>
         <div class="row-right">
           <span class="val">${p ? fmtVal(val, currency) : '—'}</span>
@@ -359,12 +397,12 @@ function render() {
         </div>
       </div>
       <div class="row-bot">
-        <span class="amt">${a.amount}</span>
+        <span class="amt">${esc(a.amount)}</span>
         <span class="price">@ ${p ? fmtVal(p, currency) : '—'}</span>
         <span class="chg ${cs}">${chgTxt}</span>
         <span class="row-actions">
-          <button class="ibtn ebtn" data-id="${a.id}">✎</button>
-          <button class="ibtn dbtn" data-id="${a.id}">✕</button>
+          <button class="ibtn ebtn" data-id="${esc(a.id)}">✎</button>
+          <button class="ibtn dbtn" data-id="${esc(a.id)}">✕</button>
         </span>
       </div>
     </div>`;
@@ -376,7 +414,7 @@ function render() {
   list.querySelectorAll('.dbtn').forEach(b =>
     b.addEventListener('click', async () => {
       assets = assets.filter(a => a.id !== b.dataset.id);
-      await store.set({ assets });
+      await saveVault();
       render();
     })
   );
@@ -446,7 +484,7 @@ async function saveAsset() {
     }
   }
 
-  await store.set({ assets });
+  await saveVault();
   hideModal('add-modal');
   render();
   doRefresh();
@@ -478,15 +516,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   const stored = await store.get();
-  assets   = stored.assets   ?? [];
   prices   = stored.prices   ?? {};
   pricesTs = stored.pricesTs ?? null;
-  history  = stored.history  ?? [];
-  currency = stored.currency ?? 'usd';
-  $('cur-sel').value = currency;
 
   // ── Lock screen setup ──────────────────────────────────────────────────
-  if (!stored.password_hash) {
+  const isNew = !stored.salt;
+  if (isNew) {
     $('lk-title').textContent = 'CREATE ACCESS CODE';
     $('lk-btn').textContent   = 'CREATE VAULT';
     $('lk-hint').textContent  = 'CHOOSE A MASTER PASSWORD';
@@ -498,14 +533,34 @@ document.addEventListener('DOMContentLoaded', async () => {
   async function tryUnlock() {
     const pw = $('lk-pw').value;
     if (!pw) return;
-    const hash  = await sha256(pw);
-    const fresh = await store.get();
-    if (!fresh.password_hash) {
-      await store.set({ password_hash: hash });
-      goToDashboard();
-    } else if (hash === fresh.password_hash) {
-      goToDashboard();
-    } else {
+
+    try {
+      const fresh = await store.get();
+
+      if (!fresh.salt) {
+        // First time: generate salt, derive key, create empty vault
+        const salt    = crypto.getRandomValues(new Uint8Array(16));
+        sessionKey    = await deriveKey(pw, salt);
+        assets = []; history = []; currency = 'usd';
+        const vault   = await encryptVault(sessionKey);
+        await store.set({ salt: b64(salt), vault });
+        goToDashboard();
+      } else {
+        // Returning user: derive key and try to decrypt
+        const salt = unb64(fresh.salt);
+        const key  = await deriveKey(pw, salt);
+        if (fresh.vault) {
+          const data = await decryptVault(fresh.vault, key); // throws if wrong pw
+          assets   = data.assets   ?? [];
+          history  = data.history  ?? [];
+          currency = data.currency ?? 'usd';
+        } else {
+          assets = []; history = []; currency = 'usd';
+        }
+        sessionKey = key;
+        goToDashboard();
+      }
+    } catch (_) {
       $('lk-pw').value = '';
       showErr($('lk-err'), '⊗ ACCESS DENIED');
       setTimeout(() => $('lk-pw').focus(), 50);
@@ -513,6 +568,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   function goToDashboard() {
+    $('cur-sel').value = currency;
     showScreen('dashboard');
     render();
     if (assets.length) doRefresh();
@@ -523,7 +579,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // ── Dashboard actions ─────────────────────────────────────────────────
   $('lock-btn').addEventListener('click', () => {
-    $('lk-pw').value          = '';
+    sessionKey            = null;
+    $('lk-pw').value      = '';
     $('lk-title').textContent = 'ACCESS CODE';
     $('lk-btn').textContent   = 'UNLOCK';
     $('lk-hint').textContent  = '';
@@ -549,7 +606,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     if (!q) { sg.innerHTML = ''; return; }
 
-    // Local results immediately
     const localHits = Object.entries(COINS)
       .filter(([k, v]) => k.startsWith(q) || v.name.toUpperCase().startsWith(q))
       .slice(0, 6)
@@ -557,7 +613,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     renderSuggestions(localHits, sg);
 
-    // API search after 400ms debounce
     if (q.length >= 2) {
       clearTimeout(searchTimer);
       searchTimer = setTimeout(() => searchCoinGecko(q, localHits, sg), 400);
@@ -573,7 +628,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   $('cur-sel').addEventListener('change', async e => {
     currency = e.target.value;
-    await store.set({ currency });
+    await saveVault();
     hideModal('settings-modal');
     doRefresh();
   });
@@ -584,8 +639,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     const err = $('settings-err');
     if (!np)       { showErr(err, 'ENTER A NEW PASSWORD'); return; }
     if (np !== cp) { showErr(err, 'PASSWORDS DO NOT MATCH'); return; }
-    await store.set({ password_hash: await sha256(np) });
-    $('new-pw').value = '';
+    // Re-derive with new salt + re-encrypt vault
+    const newSalt  = crypto.getRandomValues(new Uint8Array(16));
+    const newKey   = await deriveKey(np, newSalt);
+    sessionKey     = newKey;
+    const vault    = await encryptVault(newKey);
+    await store.set({ salt: b64(newSalt), vault });
+    $('new-pw').value  = '';
     $('conf-pw').value = '';
     hideModal('settings-modal');
   });
