@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Crypto Tracker</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+
+  <!-- ─── LOCK SCREEN ─────────────────────────────────────────────────── -->
+  <div id="lock-screen" class="screen">
+    <div class="lock-wrap">
+      <img class="lock-logo" src="icons/logo.png" alt="Crypto Tracker">
+      <div id="lk-title" class="lk-title">ACCESS CODE</div>
+      <div id="lk-hint" class="lk-hint"></div>
+      <div class="field-wrap">
+        <input id="lk-pw" type="password" placeholder="••••••••" autocomplete="off" spellcheck="false">
+      </div>
+      <div id="lk-err" class="err hidden">⊗ ACCESS DENIED</div>
+      <button id="lk-btn">UNLOCK</button>
+      <div class="powered">POWERED BY TOTE</div>
+    </div>
+  </div>
+
+  <!-- ─── DASHBOARD ───────────────────────────────────────────────────── -->
+  <div id="dashboard" class="screen hidden">
+
+    <div class="topbar">
+      <div class="topbar-brand">
+        <img class="topbar-logo" src="icons/logo.png" alt="">
+        <span class="br">[</span>CRYPTO TRACKER<span class="br">]</span>
+      </div>
+      <div class="topbar-actions">
+        <span id="refresh-btn" class="iab" title="Refresh prices">↻</span>
+        <span id="settings-btn" class="iab" title="Settings">⚙</span>
+        <span id="lock-btn" class="iab" title="Lock">⊗</span>
+      </div>
+    </div>
+
+    <div class="total-block">
+      <div class="total-lbl">TOTAL PORTFOLIO VALUE</div>
+      <div id="total-val" class="total-val">—</div>
+      <div id="total-delta" class="total-delta">—</div>
+      <div class="total-meta">
+        LAST UPDATE <span id="updated">—</span>
+        <span id="refresh-err" class="err hidden" style="margin-left:8px"></span>
+      </div>
+    </div>
+
+    <div class="chart-block">
+      <div class="sec-hdr">
+        <span class="br">[</span>PORTFOLIO EVOLUTION<span class="br">]</span>
+      </div>
+      <canvas id="chart"></canvas>
+    </div>
+
+    <div class="assets-block">
+      <div class="sec-hdr">
+        <span><span class="br">[</span>ASSETS<span class="br">]</span></span>
+        <span id="add-btn" class="add-lnk">+ ADD</span>
+      </div>
+      <div id="assets-list"></div>
+    </div>
+
+    <div class="footer-bar">POWERED BY TOTE</div>
+
+  </div>
+
+  <!-- ─── ADD / EDIT MODAL ────────────────────────────────────────────── -->
+  <div id="add-modal" class="overlay hidden">
+    <div class="modal-box">
+      <div class="modal-hdr">
+        <span id="m-title">ADD ASSET</span>
+        <span id="close-modal" class="close-x">✕</span>
+      </div>
+      <div class="field-wrap" style="position:relative">
+        <label class="field-lbl">TICKER SYMBOL</label>
+        <input id="m-ticker" type="text" placeholder="BTC, ETH, SOL..." autocomplete="off" spellcheck="false">
+        <div id="suggestions"></div>
+      </div>
+      <div class="field-wrap">
+        <label class="field-lbl">QUANTITY</label>
+        <input id="m-amount" type="number" placeholder="0.00000000" step="any" min="0" autocomplete="off">
+      </div>
+      <div id="m-err" class="err hidden"></div>
+      <button id="m-save">ADD</button>
+    </div>
+  </div>
+
+  <!-- ─── SETTINGS MODAL ──────────────────────────────────────────────── -->
+  <div id="settings-modal" class="overlay hidden">
+    <div class="modal-box">
+      <div class="modal-hdr">
+        <span><span class="br">[</span>SETTINGS<span class="br">]</span></span>
+        <span id="close-settings" class="close-x">✕</span>
+      </div>
+
+      <div class="settings-section">CURRENCY</div>
+      <div class="field-wrap">
+        <select id="cur-sel">
+          <option value="usd">USD — US Dollar</option>
+          <option value="eur">EUR — Euro</option>
+          <option value="btc">BTC — Bitcoin</option>
+        </select>
+      </div>
+
+      <div class="settings-section" style="margin-top:12px">CHANGE ACCESS CODE</div>
+      <div class="field-wrap">
+        <label class="field-lbl">NEW CODE</label>
+        <input id="new-pw" type="password" placeholder="New password" autocomplete="new-password">
+      </div>
+      <div class="field-wrap">
+        <label class="field-lbl">CONFIRM</label>
+        <input id="conf-pw" type="password" placeholder="Repeat password" autocomplete="new-password">
+      </div>
+      <div id="settings-err" class="err hidden"></div>
+      <button id="save-pw-btn">UPDATE CODE</button>
+
+      <div class="divider"></div>
+      <button id="clear-btn" class="danger-btn">CLEAR ALL DATA</button>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
